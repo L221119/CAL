@@ -368,35 +368,42 @@ class CarlaIntersectionEnv:
         for _ in range(self.stack_frames):
             self.image_buffer.append(np.zeros((3, self.img_height, self.img_width), dtype=np.uint8))
             self.ego_state_buffer.append(np.zeros(4, dtype=np.float32))
-    
+
     def _spawn_ego_vehicle(self):
-        """Spawn ego vehicle at task-specific start position."""
+        """Spawn ego vehicle at task-specific start position with retry logic."""
         blueprint_library = self.world.get_blueprint_library()
         ego_bp = blueprint_library.find('vehicle.tesla.model3')
         ego_bp.set_attribute('role_name', 'ego')
-        
-        # Use task-specific start position
-        self.ego_vehicle = self.world.try_spawn_actor(ego_bp, self.start_transform)
-        
-        # If failed, try slightly different positions
-        if self.ego_vehicle is None:
-            for offset in [(0.5, 0), (-0.5, 0), (0, 0.5), (0, -0.5)]:
-                loc = self.start_transform.location
-                modified_loc = carla.Location(
-                    x=loc.x + offset[0],
-                    y=loc.y + offset[1],
-                    z=loc.z
-                )
-                modified_transform = carla.Transform(modified_loc, self.start_transform.rotation)
-                self.ego_vehicle = self.world.try_spawn_actor(ego_bp, modified_transform)
-                if self.ego_vehicle is not None:
-                    break
-        
+
+        start_transform = self.start_transform
+
+        # Try to spawn with position offsets
+        for attempt in range(10):
+            offset_x = (attempt % 3) * 0.2
+            offset_y = (attempt // 3) * 0.2
+            adjusted_loc = carla.Location(
+                x=start_transform.location.x + offset_x,
+                y=start_transform.location.y + offset_y,
+                z=start_transform.location.z
+            )
+            adjusted_transform = carla.Transform(adjusted_loc, start_transform.rotation)
+
+            self.ego_vehicle = self.world.try_spawn_actor(ego_bp, adjusted_transform)
+            if self.ego_vehicle is not None:
+                print(f'Ego vehicle spawned at ({adjusted_loc.x:.1f}, {adjusted_loc.y:.1f})')
+                return
+
+            self.world.tick()
+
+        # Final attempt at original position
+        self.ego_vehicle = self.world.try_spawn_actor(ego_bp, start_transform)
         if self.ego_vehicle is None:
             raise RuntimeError(f'Failed to spawn ego vehicle for task {self.task}')
-        
-        print(f'Ego vehicle spawned at ({self.start_transform.location.x}, {self.start_transform.location.y})')
-    
+
+        print(f'Ego vehicle spawned at ({start_transform.location.x}, {start_transform.location.y})')
+
+
+
     def _set_fixed_spectator(self):
         """Set fixed spectator view for training visualization."""
         spectator = self.world.get_spectator()
@@ -440,13 +447,14 @@ class CarlaIntersectionEnv:
             self.image_received = True
         except Exception as e:
             print(f'Error processing image: {e}')
-    
+
     def _setup_collision_sensor(self):
         """Setup collision sensor."""
         blueprint_library = self.world.get_blueprint_library()
         collision_bp = blueprint_library.find('sensor.other.collision')
-        collision_bp.set_attribute('only_actors', 'vehicle.*')
-        
+        # 移除 only_actors 属性设置（CARLA 0.9.10 不支持此属性）
+        # collision_bp.set_attribute('only_actors', 'vehicle.*')
+
         self.collision_sensor = self.world.spawn_actor(
             collision_bp, carla.Transform(), attach_to=self.ego_vehicle
         )
@@ -655,47 +663,47 @@ class CarlaIntersectionEnv:
         self.total_distance = 0.0
         self.prev_distance = 0.0
         self.image_received = False
-        
+
         # Destroy existing ego vehicle and sensors
         if self.ego_vehicle is not None:
             self.ego_vehicle.destroy()
             self.ego_vehicle = None
-        
+
         for sensor in [self.camera, self.collision_sensor, self.lane_sensor]:
             if sensor is not None:
                 sensor.destroy()
                 sensor = None
-        
+
         # Reset traffic manager
         if self.traffic_manager is not None:
             self.traffic_manager.reset()
-        
+
         # Spawn new ego vehicle at task-specific start
         self._spawn_ego_vehicle()
-        
+
         # Setup sensors
         self._setup_camera()
         self._setup_collision_sensor()
         self._setup_lane_sensor()
-        
+
         # Set fixed spectator view
         self._set_fixed_spectator()
-        
+
         # Set weather (randomly select from training weathers)
         weather = random.choice(self.train_weathers)
         self.set_weather(weather)
-        
+
         # Get initial observation
         self.world.tick()
         self._initialize_buffers()
-        
+
         obs = self._get_observation()
         self.prev_distance = self._get_distance_to_goal()
-        
+
         self.weather_history.append(weather)
         if len(self.weather_history) > 10:
             self.weather_history.pop(0)
-        
+
         return obs
     
     def step(self, action):
