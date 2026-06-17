@@ -428,7 +428,6 @@ class CarlaIntersectionEnv:
         start_time = time.time()
         while not self.image_received and time.time() - start_time < 5.0:
             self.world.tick()
-            time.sleep(0.01)
     
     def _process_image(self, image):
         """Process camera image."""
@@ -686,12 +685,8 @@ class CarlaIntersectionEnv:
         weather = random.choice(self.train_weathers)
         self.set_weather(weather)
         
-        # Use fixed task (not random)
-        self.current_task = self.task
-        
         # Get initial observation
         self.world.tick()
-        time.sleep(0.5)
         self._initialize_buffers()
         
         obs = self._get_observation()
@@ -709,7 +704,6 @@ class CarlaIntersectionEnv:
         
         self._apply_control(action)
         self.world.tick()
-        time.sleep(0.01)
         
         obs = self._get_observation()
         
@@ -745,7 +739,7 @@ class CarlaIntersectionEnv:
         if self._is_off_road():
             done = True
             info['off_road'] = True
-            info['fail_type'] = 4
+            info['fail_type'] = 1
             info['success'] = False
         
         reward = self._compute_reward(action, info)
