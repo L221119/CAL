@@ -383,52 +383,81 @@ class CALRAPPOAgent:
             
             features = self.perception(images, ego_state, weather)
             return features.cpu().numpy()
-    
+
     def act(self, obs, deterministic=False):
         images = obs['images']
         ego_state = obs['ego_state']
         weather = obs.get('weather', 'clear')
-        
+
         state = self.extract_features(images, ego_state, weather)
         state = torch.FloatTensor(state).to(self.device)
-        
+
         with torch.no_grad():
             if deterministic:
                 action = self.policy.get_action(state, deterministic=True)
             else:
                 action, _ = self.policy.sample(state)
-        
-        action = action.cpu().numpy()
+
+        action = action.cpu().numpy().flatten()
+
+        # Ensure action is 2D
+        if len(action) < 2:
+            action = np.array([action[0] if len(action) > 0 else 0.0, 0.0])
+        elif len(action) > 2:
+            action = action[:2]
+
         action[0] = np.clip(action[0], 0.0, 15.0)
         action[1] = np.clip(action[1], -0.3, 0.3)
-        
+
         return action
-    
+
     def store_transition(self, obs, action, reward, next_obs, done, info):
+        """
+        Store transition in buffer with all data needed for risk target computation.
+        """
+        # Extract features
         state = self.extract_features(obs['images'], obs['ego_state'], obs.get('weather', 'clear'))
         next_state = self.extract_features(next_obs['images'], next_obs['ego_state'], next_obs.get('weather', 'clear'))
-        
+
+        # ========== FIX: Ensure state is 2D ==========
+        if len(state.shape) == 1:
+            state = state.reshape(1, -1)
+        if len(next_state.shape) == 1:
+            next_state = next_state.reshape(1, -1)
+
         state_t = torch.FloatTensor(state).to(self.device)
+
+        # ========== FIX: Ensure action is 2D ==========
+        action = np.array(action).flatten()
+        if len(action.shape) == 1:
+            action = action.reshape(1, -1)
         action_t = torch.FloatTensor(action).to(self.device)
-        
+
         with torch.no_grad():
             value = self.value(state_t).cpu().numpy()
             risk = self.risk_predictor(state_t, action_t).cpu().numpy()
-        
+
+        # ========== FIX: Store risk target computation data ==========
+        collision = float(info.get('collision', False))
+        speed = info.get('speed', 0.0)
         prev_action = self.buffer['actions'][-1] if len(self.buffer['actions']) > 0 else None
-        
-        self.buffer['states'].append(state)
-        self.buffer['actions'].append(action)
+        weather_variance = info.get('weather_variance', 0.0)
+
+        # Store (flattened)
+        self.buffer['states'].append(state.flatten())
+        self.buffer['actions'].append(action.flatten())
         self.buffer['rewards'].append(reward)
-        self.buffer['next_states'].append(next_state)
+        self.buffer['next_states'].append(next_state.flatten())
         self.buffer['dones'].append(float(done))
-        self.buffer['values'].append(value)
-        self.buffer['risks'].append(risk)
-        self.buffer['collisions'].append(float(info.get('collision', False)))
-        self.buffer['speeds'].append(info.get('speed', 0.0))
+        self.buffer['values'].append(value.flatten()[0] if len(value.flatten()) > 0 else 0.0)
+        self.buffer['risks'].append(risk.flatten()[0] if len(risk.flatten()) > 0 else 0.0)
+
+        # Risk target data
+        self.buffer['collisions'].append(collision)
+        self.buffer['speeds'].append(speed)
         self.buffer['prev_actions'].append(prev_action)
-        self.buffer['weather_variances'].append(info.get('weather_variance', 0.0))
-        
+        self.buffer['weather_variances'].append(weather_variance)
+
         self.total_steps += 1
     
     def compute_gae(self, rewards, values, dones, next_values):
