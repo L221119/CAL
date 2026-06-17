@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from carla_env import CarlaIntersectionEnv
-from cal_rappo import CALRAPPOAgent
+from cal-rappo import CALRAPPOAgent
 from traffic_manager import TrafficManager
 
 
