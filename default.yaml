@@ -1,1 +1,75 @@
-参数预览
+# CAL-RAPPO Configuration File
+# For unsignalized intersection autonomous driving training
+
+# ==================== Environment Settings ====================
+environment:
+  host: "localhost"
+  port: 6000
+  town: "Town05"
+  fps: 10
+  max_episode_steps: 700
+  safe_distance: 5.0
+  lane_threshold: 2.0
+  max_deviation_frames: 20
+
+# ==================== Camera Settings ====================
+camera:
+  img_width: 160
+  img_height: 120
+  fov: 90
+  cam_x: 2.5
+  cam_y: 0.0
+  cam_z: 3.2
+  cam_pitch: -15
+
+# ==================== Perception Module ====================
+perception:
+  stack_frames: 3
+  lstm_hidden_size: 256
+  cnn_channels: [32, 64, 128]
+  weathers: ["clear", "rain", "snow", "fog"]
+
+# ==================== Decision Module (RAPPO) ====================
+decision:
+  lr_actor: 3.0e-4
+  lr_risk: 1.0e-3
+  lr_dual: 5.0e-3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  update_epochs: 10
+  batch_size: 64
+  rollout_steps: 2048
+  risk_threshold: 0.2
+  entropy_coef: 0.05
+  value_coef: 0.5
+  risk_coef: 1.0
+  max_grad_norm: 0.5
+
+# ==================== Reward Weights ====================
+reward:
+  safety_weight: 0.5
+  efficiency_weight: 0.3
+  weather_weight: 0.2
+  risk_safety_weight: 0.5
+  risk_efficiency_weight: 0.3
+  risk_weather_weight: 0.2
+  ref_speed: 8.0
+  w_lane: 0.1
+  w_risk_penalty: 0.1
+  progress_scale: 1.0
+
+# ==================== Training Settings ====================
+training:
+  total_episodes: 500
+  checkpoint_freq: 50
+  save_path: "model"
+  tensorboard_log: "runs"
+  csv_log: "date"
+  lr_decay: true
+  lr_end: 1e-5
+
+# ==================== Evaluation Settings ====================
+evaluation:
+  eval_weathers: ["Glare", "HeavyRain", "HeavySnow", "Haze"]
+  eval_episodes: 50
