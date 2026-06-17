@@ -24,31 +24,35 @@ The default training agent in this repository is **CAL-RAPPO**, a RAPPO-based ag
 ## Repository Structure
 
 ```text
-IST_SACF/
-|-- README.md
-|-- environment.yml
-|-- train.py
-|-- eval.py
-|-- cal_rappo.py
-|-- carla_env.py
-|-- carla_augmentations.py
-|-- encoder.py
-|-- logger.py
-|-- settings.py
-|-- utils.py
+CAL-RAPPO/
+├── README.md
+├── environment.yml
+├── train.py
+├── eval.py
+├── default.yaml
+├── cal-rappo.py
+├── carla_env.py
+└── traffic_manager.py
 ```
+
 
 The roles of each file are as follows:
 
-- 'train.py': training entry point, responsible for parameter parsing, environment creation, training loop, periodic evaluation, and model saving.
-- 'eval.py': offline evaluation entry point, reads in 'args.json' and model weights from the experiment directory, and outputs evaluation metrics.
-- 'cal_rappo.py': default agent implementation, including CurlSacAgent, TD3Agent, and DDPGAgent.
-- 'carla_env.py': CARLA following environment, defines rewards, termination conditions, observations, and safety statistics.
-- 'carla_handler.py': responsible for automatic CARLA server startup, connection, and shutdown. 
-- 'carla_augmentations.py': implements augmentation functions for images, and provides a factory for creating augmentors. 
-- 'settings.py': global environment configuration for the project, including map, weather, action range, and debug switches.
-- 'utils.py': experience replay, frame stacking, random seed, and various training auxiliary functions. 
+- `train.py`: The training entry point, responsible for argument parsing, environment instantiation, the main training loop, periodic evaluation, and model checkpoint saving.
 
+- `eval.py`: The offline evaluation entry point, which loads the experiment configuration and model weights from the log directory, and reports comprehensive evaluation metrics.
+
+- `cal-rappo.py`: The core agent implementation, integrating weather-robust perception (AdaBN-CNN + LSTM), risk-aware decision-making (Actor/Critic with Risk Predictor), the RAPPO algorithm with Lagrangian safety constraints, and the composite reward function.
+
+- `carla_env.py`: The CARLA unsignalized intersection environment, defining the state and action spaces, reward computation, termination conditions, and task management (straight, left turn, right turn, and U-turn).
+
+- `traffic_manager.py`: Responsible for spawning, controlling, and cleaning up background vehicles, creating complex multi-vehicle interaction scenarios at the intersection.
+
+- `default.yaml`: The global hyperparameter configuration file, covering perception settings, decision-making parameters, reward weights, risk thresholds, weather conditions, and other training-related options.
+
+- `environment.yml`: The Conda environment specification, listing all dependencies including PyTorch, Gymnasium, OpenCV, TensorBoard, and the CARLA Python API.
+
+- `README.md`: The project documentation, providing an overview, key features, installation instructions, training and evaluation guides, and citation information.
 
 
 
