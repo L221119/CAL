@@ -10,8 +10,12 @@ import math
 import numpy as np
 from collections import deque
 
+
 import carla
 import cv2
+
+from traffic_manager import TrafficManager
+
 
 try:
     import gym
@@ -836,7 +840,3 @@ class PIDController:
         """Reset PID state."""
         self.integral = 0.0
         self.prev_error = 0.0
-
-
-# Import TrafficManager
-from traffic_manager import TrafficManager
