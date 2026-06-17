@@ -27,8 +27,9 @@ perception:
   stack_frames: 3
   lstm_hidden_size: 256
   cnn_channels: [32, 64, 128]
-  weathers: ["clear", "rain", "snow", "fog"]
+  weathers: [ "clear", "light_rain", "light_snow", "light_fog" ]
 
+  
 # ==================== Decision Module (RAPPO) ====================
 decision:
   lr_actor: 3.0e-4
