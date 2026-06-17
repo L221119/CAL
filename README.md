@@ -26,11 +26,14 @@ cd CAL-RAPPO
 conda env create -f environment.yml
 conda activate CAL-RAPPO
 
-# 3. Train the agent
-python train.py --agent cal-rappo
+# 3. Train the agent (choose a task)
+python train.py --task straight --agent cal-rappo
+python train.py --task left --agent cal-rappo
+python train.py --task right --agent cal-rappo
+python train.py --task uturn --agent cal-rappo
 
 # 4. Evaluate the agent
-python eval.py --checkpoint model/final_model.pth --output results/
+python eval.py --checkpoint model/straight/final_model.pth --output results/
 ```
 
 ## ✨ Project Characteristics
@@ -180,13 +183,24 @@ During training and evaluation, a large number of safety-related statistics are 
 
 ## Training
 
-### 1. Default Training
+### 1. Train a Specific Task
 
 Run the following command in the project root directory:
 
 ```bash
 conda activate CAL-RAPPO
-python train.py --agent cal-rappo
+
+# Train straight task
+python train.py --task straight --agent cal-rappo
+
+# Train left turn task
+python train.py --task left --agent cal-rappo
+
+# Train right turn task
+python train.py --task right --agent cal-rappo
+
+# Train U-turn task
+python train.py --task uturn --agent cal-rappo
 ```
 
 The default configuration includes:
@@ -203,22 +217,22 @@ The default configuration includes:
 
 ### 2. Common Training Commands
 
-Use the default cal-rappo agent:
-
 ```bash
+# Train with default task (straight)
 python train.py --agent cal-rappo
-```
 
-Adjust training steps and evaluation frequency:
+# Train specific task
+python train.py --task left --agent cal-rappo
 
-```bash
-python train.py --agent cal-rappo --total_episodes 1000 --eval_freq 100
+# Adjust training steps and evaluation frequency
+python train.py --task right --total_episodes 1000 --eval_freq 100
 ```
 
 ### 3. Common Arguments
 
 The training script currently supports many arguments. The most important ones include:
 
+- **Task**: `--task {straight,left,right,uturn}` - Select which task to train (default: straight)
 - **Environment**: `--host`, `--port`, `--town`, `--fps`
 - **Camera**: `--img_width`, `--img_height`
 - **Perception**: `--stack_frames`, `--lstm_hidden_size`
@@ -236,12 +250,36 @@ The output structure is as follows:
 
 ```text
 model/
-├── checkpoint_*.pth
-└── final_model.pth
+├── straight/
+│   ├── checkpoint_*.pth
+│   └── final_model.pth
+├── left/
+│   ├── checkpoint_*.pth
+│   └── final_model.pth
+├── right/
+│   ├── checkpoint_*.pth
+│   └── final_model.pth
+└── uturn/
+    ├── checkpoint_*.pth
+    └── final_model.pth
 runs/
-└── <run_id>/
+├── straight/
+│   └── <run_id>/
+├── left/
+│   └── <run_id>/
+├── right/
+│   └── <run_id>/
+└── uturn/
+    └── <run_id>/
 date/
-└── train_*.csv
+├── straight/
+│   └── train_*.csv
+├── left/
+│   └── train_*.csv
+├── right/
+│   └── train_*.csv
+└── uturn/
+    └── train_*.csv
 ```
 
 Where:
@@ -260,7 +298,7 @@ python eval.py --checkpoint path/to/your/checkpoint.pth --output results/
 
 Notes:
 
---checkpoint: Path to the model checkpoint to evaluate (e.g., model/final_model.pth or model/checkpoint_500.pth).
+--checkpoint: Path to the model checkpoint to evaluate (e.g., model/straight/final_model.pth or model/left/checkpoint_500.pth).
 
 --output: Directory to save evaluation results.
 
