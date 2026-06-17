@@ -69,6 +69,8 @@ def parse_args():
     parser.add_argument('--save_path', type=str, default='model', help='Model save directory')
     parser.add_argument('--tensorboard_log', type=str, default='runs', help='TensorBoard log directory')
     parser.add_argument('--config', type=str, default='default.yaml', help='Configuration file path')
+
+    parser.add_argument('--task', type=str, default='straight', choices=['straight', 'left', 'right', 'uturn'], help='Task to train on')
     
     return parser.parse_args()
 
@@ -166,7 +168,7 @@ def train():
                         'collision_rate', 'avg_speed', 'completion_time'])
     
     # Initialize environment
-    env = CarlaIntersectionEnv(config, args.host, args.port)
+    env = CarlaIntersectionEnv(config, args.host, args.port, task=args.task)
     env.setup()
     
     # Initialize agent
