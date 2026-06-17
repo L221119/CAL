@@ -371,6 +371,8 @@ def train():
         for episode in range(1, args.total_episodes + 1):
             # Reset environment with random weather
             obs = env.reset()
+            agent.reset_hidden()
+            
             episode_reward = 0.0
             episode_steps = 0
             done = False
