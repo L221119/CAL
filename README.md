@@ -273,13 +273,13 @@ runs/
     └── <run_id>/
 date/
 ├── straight/
-│   └── train_*.csv
+│   └── train*.csv
 ├── left/
-│   └── train_*.csv
+│   └── train*.csv
 ├── right/
-│   └── train_*.csv
+│   └── train*.csv
 └── uturn/
-    └── train_*.csv
+    └── train.csv
 ```
 
 Where:
