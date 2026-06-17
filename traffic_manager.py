@@ -138,7 +138,7 @@ class TrafficManager:
         # Group 5: x=35, y=105, 1 vehicle moving in positive y direction
         location.x = 35
         location.y = 105
-        for i in range(1):
+        for i in range(2):
             auto_waypoint = self.map.get_waypoint(
                 location, 
                 project_to_road=True, 
