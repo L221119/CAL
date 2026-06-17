@@ -5,9 +5,9 @@
 **CAL-RAPPO** is a vision-based deep reinforcement learning project built on the CARLA simulator, designed to enable autonomous driving at unsignalized intersections under adverse weather conditions. The project focuses on end-to-end decision-making in such challenging scenarios. It leverages forward-facing camera images and ego-vehicle states as the primary observation inputs, and trains an agent via a weather-robust perception module coupled with a risk-constrained decision module. This architecture allows the agent to learn adaptive driving strategies that effectively balance safety and efficiency, even in severe weather.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/4ed8a4c5-61f7-46b6-bef7-ab9ab8672d95" width="490" alt="Framework" align="center">
+  <img src="https://github.com/user-attachments/assets/4ed8a4c5-61f7-46b6-bef7-ab9ab8672d95" width="450" alt="Framework" align="center">
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="https://github.com/user-attachments/assets/a5fed5eb-c8eb-4848-91ae-2997c513a439" width="485" alt="Scene" align="center">
+  <img src="https://github.com/user-attachments/assets/a5fed5eb-c8eb-4848-91ae-2997c513a439" width="445" alt="Scene" align="center">
 </p>
 <p align="center">
   <em>Figure 1: Overview of the CAL-RAPPO framework.</em>
