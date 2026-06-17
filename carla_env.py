@@ -10,12 +10,8 @@ import math
 import numpy as np
 from collections import deque
 
-
 import carla
 import cv2
-
-from traffic_manager import TrafficManager
-
 
 try:
     import gym
@@ -23,24 +19,15 @@ try:
 except ImportError:
     print('gym not installed, using custom environment wrapper')
 
+# Import TrafficManager from separate file
+from traffic_manager import TrafficManager
+
 
 class CarlaIntersectionEnv:
     """
     CARLA environment for unsignalized intersection driving tasks.
     Supports four tasks: straight, left turn, right turn, U-turn.
     """
-    
-    # Weather presets
-    WEATHERS = {
-        'clear': carla.WeatherParameters.ClearNoon,
-        'light_rain': carla.WeatherParameters.LightRainNoon,
-        'light_snow': carla.WeatherParameters.SnowNoon,
-        'light_fog': carla.WeatherParameters.FoggyNoon,
-        'glare': carla.WeatherParameters.ClearNoon,  # Glare is simulated via sun angle
-        'heavy_rain': carla.WeatherParameters.HardRainNoon,
-        'heavy_snow': carla.WeatherParameters.HardSnowNoon,
-        'haze': carla.WeatherParameters.FoggyNoon
-    }
     
     def __init__(self, config, host='localhost', port=6000):
         self.config = config
@@ -74,7 +61,7 @@ class CarlaIntersectionEnv:
         self.ref_speed = config['reward'].get('ref_speed', 8.0)
         
         # Training weathers
-        self.train_weathers = config['perception'].get('weathers', ['clear', 'light_rain', 'light_snow', 'light_fog'])
+        self.train_weathers = config['perception'].get('weathers', ['Sunny', 'Light rain', 'Light snow', 'Light fog'])
         
         # State
         self.stack_frames = config['perception'].get('stack_frames', 3)
@@ -87,25 +74,24 @@ class CarlaIntersectionEnv:
         self.map = None
         self.ego_vehicle = None
         self.camera = None
-        self.camera_rgb = None
         self.collision_sensor = None
         self.lane_sensor = None
+        
+        # Traffic Manager (from separate file)
         self.traffic_manager = None
         
-        # Spawn points for ego vehicle (Town05 specific)
-        # These coordinates are for the intersection in Town05
+        # Spawn points for ego vehicle
         self.ego_start_points = []
         self.ego_end_points = []
         self._setup_spawn_points()
         
-        # Action space: [target_speed, steering_angle]
+        # Action space
         self.action_space = spaces.Box(
             low=np.array([0.0, -0.3], dtype=np.float32),
             high=np.array([15.0, 0.3], dtype=np.float32),
             dtype=np.float32
         )
         
-        # State space (will be set later)
         self.state_dim = config['perception']['lstm_hidden_size']
         self.observation_space = spaces.Dict({
             'images': spaces.Box(
@@ -121,7 +107,7 @@ class CarlaIntersectionEnv:
         })
         
         self.current_task = 'straight'
-        self.current_weather = 'clear'
+        self.current_weather = 'Sunny'
         self.episode_step = 0
         self.total_distance = 0.0
         self.prev_distance = 0.0
@@ -129,76 +115,186 @@ class CarlaIntersectionEnv:
         self.lane_deviation_frames = 0
         self.ego_start_index = 0
         
-        # For feature variance tracking (weather robustness)
         self.feature_buffer = {}
         self.weather_history = []
-        
-        # PID controller for speed
-        self.pid = PIDController()
-        
-        # Image for observation
         self.current_image = None
         self.image_received = False
         
         print('Environment initialized')
     
+    # ============================================================
+    # WEATHER PARAMETERS (Based on your paper's Table)
+    # ============================================================
+    def _create_weather_parameters(self, weather_name):
+        """
+        Create CARLA weather parameters based on the paper's Table.
+        """
+        if weather_name == 'Sunny':
+            return carla.WeatherParameters(
+                cloudiness=0.0,
+                precipitation=0.0,
+                precipitation_deposits=0.0,
+                wind_intensity=10.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=45.0,
+                fog_density=0.0,
+                fog_distance=0.0,
+                wetness=0.0,
+                fog_falloff=0.0
+            )
+        elif weather_name == 'Light rain':
+            return carla.WeatherParameters(
+                cloudiness=60.0,
+                precipitation=20.0,
+                precipitation_deposits=20.0,
+                wind_intensity=30.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=45.0,
+                fog_density=0.0,
+                fog_distance=0.0,
+                wetness=60.0,
+                fog_falloff=0.0
+            )
+        elif weather_name == 'Light snow':
+            return carla.WeatherParameters(
+                cloudiness=80.0,
+                precipitation=10.0,
+                precipitation_deposits=50.0,
+                wind_intensity=20.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=30.0,
+                fog_density=0.0,
+                fog_distance=0.0,
+                wetness=60.0,
+                fog_falloff=0.0
+            )
+        elif weather_name == 'Light fog':
+            return carla.WeatherParameters(
+                cloudiness=20.0,
+                precipitation=0.0,
+                precipitation_deposits=0.0,
+                wind_intensity=10.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=45.0,
+                fog_density=40.0,
+                fog_distance=100.0,
+                wetness=0.0,
+                fog_falloff=0.3
+            )
+        elif weather_name == 'Glare':
+            return carla.WeatherParameters(
+                cloudiness=0.0,
+                precipitation=0.0,
+                precipitation_deposits=0.0,
+                wind_intensity=5.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=10.0,  # Low angle for glare
+                fog_density=0.0,
+                fog_distance=0.0,
+                wetness=0.0,
+                fog_falloff=0.0
+            )
+        elif weather_name == 'Heavy rain':
+            return carla.WeatherParameters(
+                cloudiness=100.0,
+                precipitation=100.0,
+                precipitation_deposits=100.0,
+                wind_intensity=60.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=20.0,
+                fog_density=0.0,
+                fog_distance=0.0,
+                wetness=100.0,
+                fog_falloff=0.0
+            )
+        elif weather_name == 'Heavy snow':
+            return carla.WeatherParameters(
+                cloudiness=100.0,
+                precipitation=50.0,
+                precipitation_deposits=100.0,
+                wind_intensity=40.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=15.0,
+                fog_density=10.0,
+                fog_distance=80.0,
+                wetness=100.0,
+                fog_falloff=0.2
+            )
+        elif weather_name == 'Haze':
+            return carla.WeatherParameters(
+                cloudiness=80.0,
+                precipitation=0.0,
+                precipitation_deposits=0.0,
+                wind_intensity=15.0,
+                sun_azimuth_angle=90.0,
+                sun_altitude_angle=30.0,
+                fog_density=60.0,
+                fog_distance=60.0,
+                wetness=80.0,
+                fog_falloff=0.4
+            )
+        else:
+            print(f'Weather {weather_name} not recognized, using Sunny')
+            return carla.WeatherParameters.ClearNoon
+    
+    def set_weather(self, weather_name):
+        """Set weather condition using the paper's parameters."""
+        self.current_weather = weather_name
+        weather_params = self._create_weather_parameters(weather_name)
+        if weather_params is not None:
+            self.world.set_weather(weather_params)
+            self.world.tick()
+    
+    # ============================================================
+    # SPAWN POINTS SETUP
+    # ============================================================
     def _setup_spawn_points(self):
-        """Setup spawn and end points for different tasks in Town05."""
-        # Town05 intersection center (approximate)
-        # These coordinates are based on CARLA Town05 map
-        
-        # Intersection center
-        intersection_center = carla.Location(x=0, y=0, z=0.5)
-        
-        # Start points (one for each direction)
-        # These are positions approaching the intersection from four directions
+        """Setup spawn and end points for different tasks."""
         start_points = [
-            carla.Location(x=-30, y=0, z=0.5),    # South approach (coming from south)
-            carla.Location(x=30, y=0, z=0.5),     # North approach (coming from north)
-            carla.Location(x=0, y=-30, z=0.5),    # East approach (coming from east)
-            carla.Location(x=0, y=30, z=0.5)      # West approach (coming from west)
+            carla.Location(x=-30, y=0, z=0.5),
+            carla.Location(x=30, y=0, z=0.5),
+            carla.Location(x=0, y=-30, z=0.5),
+            carla.Location(x=0, y=30, z=0.5)
         ]
         
-        # End points (for different tasks)
-        # Each task has 4 possible end points corresponding to start indices
         end_points = {
             'straight': [
-                carla.Location(x=30, y=0, z=0.5),      # North exit (from south)
-                carla.Location(x=-30, y=0, z=0.5),     # South exit (from north)
-                carla.Location(x=0, y=30, z=0.5),      # East exit (from west)
-                carla.Location(x=0, y=-30, z=0.5)      # West exit (from east)
+                carla.Location(x=30, y=0, z=0.5),
+                carla.Location(x=-30, y=0, z=0.5),
+                carla.Location(x=0, y=30, z=0.5),
+                carla.Location(x=0, y=-30, z=0.5)
             ],
             'left': [
-                carla.Location(x=0, y=30, z=0.5),      # East exit (from south) - turn left
-                carla.Location(x=0, y=-30, z=0.5),     # West exit (from north)
-                carla.Location(x=-30, y=0, z=0.5),     # South exit (from west)
-                carla.Location(x=30, y=0, z=0.5)       # North exit (from east)
+                carla.Location(x=0, y=30, z=0.5),
+                carla.Location(x=0, y=-30, z=0.5),
+                carla.Location(x=-30, y=0, z=0.5),
+                carla.Location(x=30, y=0, z=0.5)
             ],
             'right': [
-                carla.Location(x=0, y=-30, z=0.5),     # West exit (from south) - turn right
-                carla.Location(x=0, y=30, z=0.5),      # East exit (from north)
-                carla.Location(x=30, y=0, z=0.5),      # North exit (from west)
-                carla.Location(x=-30, y=0, z=0.5)      # South exit (from east)
+                carla.Location(x=0, y=-30, z=0.5),
+                carla.Location(x=0, y=30, z=0.5),
+                carla.Location(x=30, y=0, z=0.5),
+                carla.Location(x=-30, y=0, z=0.5)
             ],
             'uturn': [
-                carla.Location(x=-30, y=0, z=0.5),     # South exit (from south) - U-turn
-                carla.Location(x=30, y=0, z=0.5),      # North exit (from north)
-                carla.Location(x=0, y=-30, z=0.5),     # West exit (from west)
-                carla.Location(x=0, y=30, z=0.5)       # East exit (from east)
+                carla.Location(x=-30, y=0, z=0.5),
+                carla.Location(x=30, y=0, z=0.5),
+                carla.Location(x=0, y=-30, z=0.5),
+                carla.Location(x=0, y=30, z=0.5)
             ]
         }
         
         self.ego_start_points = start_points
         self.ego_end_points = end_points
     
+    # ============================================================
+    # ENVIRONMENT SETUP
+    # ============================================================
     def setup(self):
         """Initialize CARLA environment."""
         try:
-            # Connect to CARLA server
             self.client = carla.Client(self.host, self.port)
             self.client.set_timeout(10.0)
-            
-            # Load world
             self.world = self.client.load_world(self.town)
             self.map = self.world.get_map()
             
@@ -208,7 +304,7 @@ class CarlaIntersectionEnv:
             settings.fixed_delta_seconds = 1.0 / self.fps
             self.world.apply_settings(settings)
             
-            # Setup traffic manager with fixed positions
+            # Initialize Traffic Manager (from separate file)
             self.traffic_manager = TrafficManager(self.client, self.world)
             
             # Spawn ego vehicle
@@ -222,7 +318,7 @@ class CarlaIntersectionEnv:
             # Set spectator
             self._set_spectator()
             
-            # Spawn traffic vehicles at fixed positions
+            # Spawn traffic vehicles (uses your spawn_vehicle method)
             self.traffic_manager.spawn_traffic(use_fixed_positions=True)
             
             # Initialize buffers
@@ -237,11 +333,6 @@ class CarlaIntersectionEnv:
     
     def _initialize_buffers(self):
         """Initialize image and state buffers."""
-        # Get initial images
-        self.world.tick()
-        time.sleep(0.1)
-        
-        # Fill buffers with initial observations
         for _ in range(self.stack_frames):
             self.image_buffer.append(np.zeros((3, self.img_height, self.img_width), dtype=np.uint8))
             self.ego_state_buffer.append(np.zeros(4, dtype=np.float32))
@@ -252,25 +343,18 @@ class CarlaIntersectionEnv:
         ego_bp = blueprint_library.find('vehicle.tesla.model3')
         ego_bp.set_attribute('role_name', 'ego')
         
-        # Random spawn point
         self.ego_start_index = random.randint(0, len(self.ego_start_points) - 1)
         spawn_point = self.ego_start_points[self.ego_start_index]
+        yaw = self.ego_start_index * 90
+        transform = carla.Transform(spawn_point, carla.Rotation(yaw=yaw))
         
-        # Add rotation based on approach direction
-        yaw = self.ego_start_index * 90  # 0: south, 90: east, 180: north, 270: west
-        rotation = carla.Rotation(yaw=yaw)
-        transform = carla.Transform(spawn_point, rotation)
-        
-        # Spawn vehicle
         self.ego_vehicle = self.world.try_spawn_actor(ego_bp, transform)
         
         if self.ego_vehicle is None:
-            # Try alternative spawn point
             for i in range(len(self.ego_start_points)):
                 if i != self.ego_start_index:
                     yaw = i * 90
-                    rotation = carla.Rotation(yaw=yaw)
-                    transform = carla.Transform(self.ego_start_points[i], rotation)
+                    transform = carla.Transform(self.ego_start_points[i], carla.Rotation(yaw=yaw))
                     self.ego_vehicle = self.world.try_spawn_actor(ego_bp, transform)
                     if self.ego_vehicle is not None:
                         self.ego_start_index = i
@@ -278,9 +362,10 @@ class CarlaIntersectionEnv:
         
         if self.ego_vehicle is None:
             raise RuntimeError('Failed to spawn ego vehicle')
-        
-        print(f'Ego vehicle spawned at index {self.ego_start_index}')
     
+    # ============================================================
+    # SENSOR SETUP
+    # ============================================================
     def _setup_camera(self):
         """Setup front-facing RGB camera."""
         blueprint_library = self.world.get_blueprint_library()
@@ -289,7 +374,6 @@ class CarlaIntersectionEnv:
         camera_bp.set_attribute('image_size_y', str(self.img_height))
         camera_bp.set_attribute('fov', str(self.fov))
         
-        # Camera transform relative to ego vehicle
         camera_transform = carla.Transform(
             carla.Location(x=self.cam_x, y=self.cam_y, z=self.cam_z),
             carla.Rotation(pitch=self.cam_pitch)
@@ -298,7 +382,6 @@ class CarlaIntersectionEnv:
         self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.ego_vehicle)
         self.camera.listen(lambda image: self._process_image(image))
         
-        # Wait for first image
         self.image_received = False
         start_time = time.time()
         while not self.image_received and time.time() - start_time < 5.0:
@@ -311,8 +394,7 @@ class CarlaIntersectionEnv:
             array = np.frombuffer(image.raw_data, dtype=np.uint8)
             array = array.reshape((self.img_height, self.img_width, 4))
             rgb = array[:, :, :3]
-            rgb = np.transpose(rgb, (2, 0, 1))  # HWC -> CHW
-            
+            rgb = np.transpose(rgb, (2, 0, 1))
             self.current_image = rgb
             self.image_received = True
         except Exception as e:
@@ -332,7 +414,6 @@ class CarlaIntersectionEnv:
     def _on_collision(self, event):
         """Handle collision event."""
         self.collision_occurred = True
-        print(f'Collision detected with {event.other_actor.type_id}')
     
     def _setup_lane_sensor(self):
         """Setup lane invasion sensor."""
@@ -356,57 +437,28 @@ class CarlaIntersectionEnv:
         spectator = self.world.get_spectator()
         transform = self.ego_vehicle.get_transform()
         
-        # Position spectator behind and above the vehicle
-        location = transform.location
-        rotation = transform.rotation
-        
-        # Convert yaw to radians
-        yaw_rad = math.radians(rotation.yaw)
-        
-        # Calculate position behind vehicle
+        yaw_rad = math.radians(transform.rotation.yaw)
         offset_x = -15 * math.cos(yaw_rad)
         offset_y = -15 * math.sin(yaw_rad)
         
         spectator_transform = carla.Transform(
             carla.Location(
-                x=location.x + offset_x,
-                y=location.y + offset_y,
-                z=location.z + 10
+                x=transform.location.x + offset_x,
+                y=transform.location.y + offset_y,
+                z=transform.location.z + 10
             ),
-            carla.Rotation(pitch=-30, yaw=rotation.yaw)
+            carla.Rotation(pitch=-30, yaw=transform.rotation.yaw)
         )
         spectator.set_transform(spectator_transform)
     
-    def set_weather(self, weather):
-        """Set weather condition."""
-        self.current_weather = weather
-        
-        if weather in self.WEATHERS:
-            weather_params = self.WEATHERS[weather]
-            
-            # Special handling for glare (strong sunlight)
-            if weather == 'glare':
-                weather_params = carla.WeatherParameters(
-                    cloudiness=0.0,
-                    precipitation=0.0,
-                    precipitation_deposits=0.0,
-                    wind_intensity=0.0,
-                    sun_azimuth_angle=45.0,
-                    sun_altitude_angle=80.0,
-                    fog_density=0.0,
-                    fog_distance=0.0
-                )
-            
-            self.world.set_weather(weather_params)
-            self.world.tick()
-    
+    # ============================================================
+    # OBSERVATION AND STATE
+    # ============================================================
     def _get_current_image(self):
         """Get current image from buffer."""
         if self.current_image is not None and self.image_received:
             return self.current_image
-        else:
-            # Return zero image if no image received
-            return np.zeros((3, self.img_height, self.img_width), dtype=np.uint8)
+        return np.zeros((3, self.img_height, self.img_width), dtype=np.uint8)
     
     def _get_ego_state(self):
         """Get current ego vehicle state."""
@@ -415,32 +467,19 @@ class CarlaIntersectionEnv:
         
         transform = self.ego_vehicle.get_transform()
         velocity = self.ego_vehicle.get_velocity()
-        
-        # Speed in m/s
         speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        
-        # Position and orientation
-        location = transform.location
         yaw = math.radians(transform.rotation.yaw)
         
-        return np.array([
-            speed,
-            location.x,
-            location.y,
-            yaw
-        ], dtype=np.float32)
+        return np.array([speed, transform.location.x, transform.location.y, yaw], dtype=np.float32)
     
     def _get_observation(self):
         """Get current observation."""
-        # Get current image
         image = self._get_current_image()
         self.image_buffer.append(image)
         
-        # Get ego state
         ego_state = self._get_ego_state()
         self.ego_state_buffer.append(ego_state)
         
-        # Stack frames
         images = np.array(list(self.image_buffer))
         if len(images) < self.stack_frames:
             pad = self.stack_frames - len(images)
@@ -477,8 +516,7 @@ class CarlaIntersectionEnv:
     
     def _is_at_goal(self):
         """Check if ego vehicle reached goal."""
-        distance = self._get_distance_to_goal()
-        return distance < 3.0
+        return self._get_distance_to_goal() < 3.0
     
     def _is_off_road(self):
         """Check if ego vehicle is off-road."""
@@ -492,8 +530,8 @@ class CarlaIntersectionEnv:
         min_dist = 50.0
         transform = self.ego_vehicle.get_transform()
         
-        # Check all vehicles in the world
-        for vehicle in self.world.get_actors().filter('vehicle.*'):
+        all_vehicles = self.world.get_actors().filter('vehicle.*')
+        for vehicle in all_vehicles:
             if vehicle.id == self.ego_vehicle.id:
                 continue
             
@@ -508,86 +546,63 @@ class CarlaIntersectionEnv:
         return min_dist
     
     def _compute_weather_robustness_reward(self):
-        """
-        Compute weather robustness reward based on feature variance.
-        This is a simplified version; in practice, features come from the perception module.
-        """
-        # Simulate feature variance across weathers
-        # In real implementation, this would use actual feature vectors
+        """Compute weather robustness reward."""
         if len(self.weather_history) < 2:
             return 0.0
         
-        # Simplified: use ego state variance as proxy
         states = []
         for w in self.weather_history[-4:]:
-            # Store recent ego states
             states.append(self._get_ego_state())
         
         if len(states) >= 2:
             states = np.array(states)
             variance = np.var(states, axis=0).mean()
-            # Normalize variance
-            reward = max(0.0, 1.0 - variance / 10.0)
-            return reward
+            return max(0.0, 1.0 - variance / 10.0)
         
         return 0.0
     
+    # ============================================================
+    # REWARD AND CONTROL
+    # ============================================================
     def _compute_reward(self, action, info):
         """Compute reward based on safety, efficiency, and weather robustness."""
         if self.ego_vehicle is None:
             return 0.0
         
-        # Get current state
-        transform = self.ego_vehicle.get_transform()
         velocity = self.ego_vehicle.get_velocity()
         speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        
-        # Current distance to goal
         current_distance = self._get_distance_to_goal()
         
-        # ============ Safety Reward ============
-        # Distance to nearest obstacle
+        # Safety Reward
         min_distance = self._get_min_distance_to_obstacle()
         safety_reward = np.exp(-self.safe_distance / (min_distance + 1e-6))
         
-        # Collision penalty
         if self.collision_occurred:
             safety_reward = -10.0
         else:
             safety_reward = self.safety_weight * safety_reward
         
-        # ============ Efficiency Reward ============
-        # Progress towards goal
+        # Efficiency Reward
         progress = (self.prev_distance - current_distance) / 10.0
         efficiency_reward = self.efficiency_weight * max(progress, -1.0)
-        
-        # Speed reward (encourage maintaining speed near reference)
         speed_reward = min(speed / self.ref_speed, 1.0)
         efficiency_reward += self.efficiency_weight * 0.3 * speed_reward
         
-        # ============ Weather Robustness Reward ============
+        # Weather Robustness Reward
         weather_reward = self.weather_weight * self._compute_weather_robustness_reward()
         
-        # ============ Additional Penalties ============
-        # Lane keeping penalty
+        # Penalties
         lane_penalty = -self.w_lane * (self.lane_deviation_frames / self.max_episode_steps)
-        
-        # Risk penalty (from risk predictor in practice)
         risk = info.get('risk', 0.0)
         risk_penalty = -self.w_risk_penalty * risk
         
-        # ============ Total Reward ============
-        reward = (safety_reward + efficiency_reward + weather_reward + 
-                  lane_penalty + risk_penalty)
+        # Total Reward
+        reward = safety_reward + efficiency_reward + weather_reward + lane_penalty + risk_penalty
         
-        # Goal completion bonus
         if self._is_at_goal():
             reward += 20.0
-            print(f'Goal reached! Bonus +20.0')
         
-        # Update previous distance
         self.prev_distance = current_distance
-        
         return reward
     
     def _apply_control(self, action):
@@ -595,35 +610,26 @@ class CarlaIntersectionEnv:
         if self.ego_vehicle is None:
             return
         
-        target_speed = float(action[0])
-        steering = float(action[1])
+        target_speed = np.clip(float(action[0]), 0.0, 15.0)
+        steering = np.clip(float(action[1]), -0.3, 0.3)
         
-        # Clamp values
-        target_speed = np.clip(target_speed, 0.0, 15.0)
-        steering = np.clip(steering, -0.3, 0.3)
-        
-        # Get current speed
         velocity = self.ego_vehicle.get_velocity()
         current_speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
         
-        # PID control for throttle/brake
         speed_error = target_speed - current_speed
-        
-        # Simple P controller with saturation
         throttle = np.clip(0.5 * speed_error + 0.2, 0.0, 1.0)
         brake = np.clip(-0.5 * speed_error, 0.0, 1.0) if speed_error < 0 else 0.0
         
-        # Apply control
         control = carla.VehicleControl()
         control.throttle = throttle
         control.brake = brake
         control.steer = steering
-        control.hand_brake = False
-        control.reverse = False
-        control.manual_gear_shift = False
         
         self.ego_vehicle.apply_control(control)
     
+    # ============================================================
+    # RESET AND STEP
+    # ============================================================
     def reset(self):
         """Reset environment for new episode."""
         # Clear buffers
@@ -641,17 +647,14 @@ class CarlaIntersectionEnv:
             self.ego_vehicle.destroy()
             self.ego_vehicle = None
         
-        if self.camera is not None:
-            self.camera.destroy()
-            self.camera = None
+        for sensor in [self.camera, self.collision_sensor, self.lane_sensor]:
+            if sensor is not None:
+                sensor.destroy()
+                sensor = None
         
-        if self.collision_sensor is not None:
-            self.collision_sensor.destroy()
-            self.collision_sensor = None
-        
-        if self.lane_sensor is not None:
-            self.lane_sensor.destroy()
-            self.lane_sensor = None
+        # Reset traffic manager
+        if self.traffic_manager is not None:
+            self.traffic_manager.reset()
         
         # Spawn new ego vehicle
         self._spawn_ego_vehicle()
@@ -668,21 +671,14 @@ class CarlaIntersectionEnv:
         # Set task (randomly select)
         self.current_task = random.choice(['straight', 'left', 'right', 'uturn'])
         
-        # Reset traffic
-        self.traffic_manager.reset()
-        
         # Get initial observation
         self.world.tick()
         time.sleep(0.5)
-        
-        # Initialize buffers
         self._initialize_buffers()
         
-        # Get initial observation
         obs = self._get_observation()
         self.prev_distance = self._get_distance_to_goal()
         
-        # Record weather for robustness calculation
         self.weather_history.append(weather)
         if len(self.weather_history) > 10:
             self.weather_history.pop(0)
@@ -693,73 +689,56 @@ class CarlaIntersectionEnv:
         """Execute one step in the environment."""
         self.episode_step += 1
         
-        # Apply action
         self._apply_control(action)
-        
-        # Tick world
         self.world.tick()
-        time.sleep(0.01)  # Small delay for sensor updates
-        
-        # Update spectator
+        time.sleep(0.01)
         self._set_spectator()
         
-        # Get observation
         obs = self._get_observation()
         
-        # Check termination conditions
         done = False
-        info = {
-            'weather': self.current_weather,
-            'task': self.current_task,
-            'steps': self.episode_step
-        }
+        info = {'weather': self.current_weather, 'task': self.current_task, 'steps': self.episode_step}
         
-        # Collision
         if self.collision_occurred:
             done = True
             info['collision'] = True
             info['fail_type'] = 1
             info['success'] = False
         
-        # Timeout
         if self.episode_step >= self.max_episode_steps:
             done = True
             info['timeout'] = True
             info['fail_type'] = 2
             info['success'] = False
         
-        # Goal reached
         if self._is_at_goal():
             done = True
             info['success'] = True
             info['fail_type'] = 3
             info['completion_time'] = self.episode_step / self.fps
         
-        # Off-road (lane deviation too long)
         if self._is_off_road():
             done = True
             info['off_road'] = True
             info['fail_type'] = 4
             info['success'] = False
         
-        # Compute reward
         reward = self._compute_reward(action, info)
         
-        # Gather additional info
-        transform = self.ego_vehicle.get_transform()
         velocity = self.ego_vehicle.get_velocity()
         speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        current_distance = self._get_distance_to_goal()
-        
         info.update({
             'speed': speed,
-            'distance_to_goal': current_distance,
-            'avg_speed': speed if done else 0.0,  # Will be updated in eval
+            'distance_to_goal': self._get_distance_to_goal(),
+            'avg_speed': speed if done else 0.0,
             'drivew_score': self._compute_weather_robustness_reward()
         })
         
         return obs, reward, done, info
     
+    # ============================================================
+    # CLEANUP
+    # ============================================================
     def close(self):
         """Close environment."""
         self.cleanup()
@@ -768,7 +747,6 @@ class CarlaIntersectionEnv:
         """Clean up all resources."""
         print('Cleaning up environment...')
         
-        # Destroy sensors
         for sensor in [self.camera, self.collision_sensor, self.lane_sensor]:
             if sensor is not None:
                 try:
@@ -776,21 +754,18 @@ class CarlaIntersectionEnv:
                 except Exception as e:
                     print(f'Error destroying sensor: {e}')
         
-        # Destroy ego vehicle
         if self.ego_vehicle is not None:
             try:
                 self.ego_vehicle.destroy()
             except Exception as e:
                 print(f'Error destroying ego vehicle: {e}')
         
-        # Cleanup traffic
         if self.traffic_manager is not None:
             try:
                 self.traffic_manager.cleanup()
             except Exception as e:
-                print(f'Error cleaning traffic: {e}')
+                print(f'Error cleaning traffic manager: {e}')
         
-        # Reset world settings
         if self.world is not None:
             try:
                 settings = self.world.get_settings()
@@ -803,40 +778,6 @@ class CarlaIntersectionEnv:
         self.camera = None
         self.collision_sensor = None
         self.lane_sensor = None
+        self.traffic_manager = None
         
         print('Environment cleanup completed')
-
-
-class PIDController:
-    """Simple PID controller for speed control."""
-    
-    def __init__(self, kp=1.0, ki=0.1, kd=0.05):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.integral = 0.0
-        self.prev_error = 0.0
-    
-    def compute(self, target, current, dt=0.1):
-        """Compute control output."""
-        error = target - current
-        
-        # Proportional
-        p = self.kp * error
-        
-        # Integral
-        self.integral += error * dt
-        i = self.ki * self.integral
-        
-        # Derivative
-        d = self.kd * (error - self.prev_error) / dt
-        
-        # Update previous error
-        self.prev_error = error
-        
-        return p + i + d
-    
-    def reset(self):
-        """Reset PID state."""
-        self.integral = 0.0
-        self.prev_error = 0.0
