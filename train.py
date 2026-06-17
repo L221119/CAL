@@ -30,8 +30,8 @@ def parse_args():
     parser.add_argument('--fps', type=int, default=10, help='Simulation FPS')
     
     # Camera
-    parser.add_argument('--img_width', type=int, default=160, help='Camera image width')
-    parser.add_argument('--img_height', type=int, default=120, help='Camera image height')
+    parser.add_argument('--img_width', type=int, default=256, help='Camera image width')
+    parser.add_argument('--img_height', type=int, default=256, help='Camera image height')
     
     # Perception
     parser.add_argument('--stack_frames', type=int, default=3, help='Number of frames to stack')
